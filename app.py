@@ -8,11 +8,25 @@ API_KEY = st.secrets["TMDB_API_KEY"]
 FALLBACK_POSTER = "https://placehold.co/500x750?text=No+Poster"
 
 
+def make_label(row):
+    if pd.notna(row["year"]):
+        return f"{row['title']} ({int(row['year'])})"
+    return row["title"]
+
+
 @st.cache_resource
 def load_data():
     movies = pd.DataFrame(pickle.load(open("movie_dict.pkl", "rb")))
+    movies["label"] = movies.apply(make_label, axis=1)
     top5 = pickle.load(open("top5.pkl", "rb"))
-    return movies, top5
+    meta = pickle.load(open("meta.pkl", "rb"))
+
+    label_to_idx = {}
+    for i, lab in enumerate(movies["label"]):
+        label_to_idx.setdefault(lab, i)
+    labels = sorted(label_to_idx, key=str.lower)
+
+    return movies, top5, meta, label_to_idx, labels
 
 
 @st.cache_data(show_spinner=False)
@@ -33,27 +47,51 @@ def fetch_poster(movie_id):
     return FALLBACK_POSTER
 
 
-def recommend(movie, movies, top5):
-    idx = movies[movies["title"] == movie].index[0]
-    id_col = "movie_id" if "movie_id" in movies.columns else "id"
-    names, posters = [], []
+def explain(src_id, rec_id, meta):
+    a, b = meta.get(int(src_id)), meta.get(int(rec_id))
+    if not a or not b:
+        return ""
+    parts = []
+    for key, label, limit in [
+        ("director", "Director", 1),
+        ("cast", "Cast", 2),
+        ("genres", "Genre", 3),
+        ("keywords", "Theme", 3),
+    ]:
+        src_set = set(a[key])
+        shared = [x for x in b[key] if x in src_set][:limit]
+        if shared:
+            parts.append(f"{label}: {', '.join(shared)}")
+    return " · ".join(parts) if parts else "Similar plot description"
+
+
+def recommend(idx, movies, top5, meta):
+    src_id = movies.iloc[idx]["movie_id"]
+    results = []
     for i in top5[idx]:
         row = movies.iloc[int(i)]
-        names.append(row["title"])
-        posters.append(fetch_poster(row[id_col]))
-    return names, posters
+        results.append({
+            "name": row["label"],
+            "poster": fetch_poster(row["movie_id"]),
+            "reason": explain(src_id, row["movie_id"], meta),
+        })
+    return results
 
 
-movies, top5 = load_data()
+movies, top5, meta, label_to_idx, labels = load_data()
 
 st.title("Movie Recommender System")
-selected_movie = st.selectbox("Select a movie to get recommendations:", movies["title"].values)
+st.caption(f"{len(labels):,} movies · type in the box to search")
+
+selected = st.selectbox("Select a movie to get recommendations:", labels)
 
 if st.button("Recommend"):
     with st.spinner("Fetching recommendations..."):
-        names, posters = recommend(selected_movie, movies, top5)
+        results = recommend(label_to_idx[selected], movies, top5, meta)
 
-    for col, name, poster in zip(st.columns(len(names)), names, posters):
+    for col, r in zip(st.columns(len(results)), results):
         with col:
-            st.image(poster)
-            st.markdown(f"**{name}**")
+            st.image(r["poster"])
+            st.markdown(f"**{r['name']}**")
+            if r["reason"]:
+                st.caption(r["reason"])
