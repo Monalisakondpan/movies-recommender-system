@@ -2,7 +2,7 @@
 
 A content-based movie recommender covering **4,803 movies** from the TMDB 5000 dataset. Pick any movie and get 5 similar ones, with posters and a short explanation of **why** each was recommended.
 
-**Live demo:** _coming soon_
+**Live demo:** **Live demo:** https://monalisa-movie-recommender.streamlit.app
 
 ![Screenshot](screenshot.png)
 
